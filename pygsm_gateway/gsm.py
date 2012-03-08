@@ -1,6 +1,5 @@
 import time
 import copy
-import Queue
 import urllib
 import urllib2
 import logging
@@ -44,7 +43,7 @@ class GsmPollingThread(threading.Thread):
         # if the modem isn't present yet, this message is probably being sent by
         # an application during startup from the main thread, before this thread
         # has connected to the modem. block for a short while before giving up.
-        for n in range(0, self.MAX_CONNECT_TIME*10):
+        for n in range(0, self.MAX_CONNECT_TIME * 10):
             if self.modem is not None: return True
             time.sleep(0.1)
 
@@ -52,6 +51,37 @@ class GsmPollingThread(threading.Thread):
         # this is bad news, but not fatal, so warn
         logger.warning("Timed out while waiting for modem")
         return False
+
+    def get_inbox_ids(self,):
+        """
+        For figuring out message box size
+        """
+
+        boxdata = self.modem.query('AT+CMGD=?')
+
+        if "error" in boxdata.lower():
+            print "Error - phone not supported"
+            exit()
+
+        message_ids = boxdata.split("(")[1].split(")")[0].split("-")[0].split(',')
+
+        logger.debug('SIM Inbox size: %s message ids: %s' % (message_ids.__len__(), message_ids))
+
+        return message_ids
+
+    def clean_up_inbox(self,):
+        """
+        The Clean up / delete every message routine
+        """
+
+        message_ids = self.get_inbox_ids()
+
+        for message_id in message_ids:
+            try:
+                self.modem.command('AT+CMGD=' + str(message_id))
+                logger.debug('Cleaned read message %s from inbox' % message_id)
+            except:
+                pass
 
     def send(self, identity, text):
 
@@ -63,6 +93,8 @@ class GsmPollingThread(threading.Thread):
 
         # attempt to send the message
         # failure is bad, but not fatal
+        if str(identity).startswith('+') == False:
+            identity = '+' + str(identity)
         was_sent = self.modem.send_sms(str(identity), text)
 
         if was_sent:
@@ -77,12 +109,27 @@ class GsmPollingThread(threading.Thread):
         url_args = copy.copy(self.url_args)
         url_args['identity'] = identity
         url_args['text'] = text
+
+        # For compatibility with rapidsms-httprouter
+        url_args['backend'] = 'console'
+        url_args['sender'] = identity
+        url_args['message'] = text
+
         try:
+            # First we try a GET for httprouter
             logger.debug('Opening URL: %s' % self.url)
-            response = urllib2.urlopen(self.url, urllib.urlencode(url_args))
+            response = urllib2.urlopen(self.url + '/?' + urllib.urlencode(url_args))  # This does a GET and likes rapidsms-httprouter
+        except urllib2.HTTPError:
+            # If that doesn't work we try a POST for threadless router
+            try:
+                response = urllib2.urlopen(self.url, urllib.urlencode(url_args))  # This does a POST and likes threadless_router
+            except Exception, e:
+                logger.exception(e)
+                return False
         except Exception, e:
             logger.exception(e)
             return False
+
         logger.info('SENT')
         logger.debug('response: %s' % response.read())
 
@@ -110,7 +157,7 @@ class GsmPollingThread(threading.Thread):
             "_signal":  level,
             "_title":   self.title,
             "Messages Sent": self.sent_messages,
-            "Messages Received": self.received_messages }
+            "Messages Received": self.received_messages}
 
         # pygsm can return the name of the network
         # operator since b19cf3. add it if we can
@@ -130,6 +177,10 @@ class GsmPollingThread(threading.Thread):
                                         **self.modem_kwargs)
             self.modem.boot()
 
+            # Clean up (delete) all read messages from the SIM so it doesn't get filled up.
+            # Don't do this unless we can't be both clever and on schedule
+            # self.clean_up_inbox() # we're attempting to be clever (see above comment)
+
             if getattr(self, 'service_center', None) is not None:
                 self.modem.service_center = self.service_center
         except:
@@ -146,18 +197,24 @@ class GsmPollingThread(threading.Thread):
             while self.running:
                 logger.info("Polling modem for messages")
                 msg = self.modem.next_message()
-    
+
                 if msg is not None:
                     self.received_messages += 1
-    
+
                     # we got an sms! hand it off to the
                     # router to be dispatched to the apps
-                    x = self.message(msg.sender, msg.text)
-    
+                    success = self.message(msg.sender, msg.text)
+
+                    # if the message was processed successfully remove it from the sim card
+                    if success != False:
+                        id = self.get_inbox_ids().pop(0)
+                        self.modem.command('AT+CMGD=' + str(id))
+                        logger.debug("Deleted message id: %s" % id)
+
                 # wait for POLL_INTERVAL seconds before continuing
                 # (in a slightly bizarre way, to ensure that we abort
                 # as soon as possible when the backend is asked to stop)
-                for n in range(0, self.POLL_INTERVAL*10):
+                for n in range(0, self.POLL_INTERVAL * 10):
                     if not self.running: return None
                     time.sleep(0.1)
         except:
