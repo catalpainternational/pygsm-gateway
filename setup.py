@@ -11,6 +11,7 @@ setup(
     exclude_package_data={
         '': ['*.sql', '*.pyc'],
     },
+    scripts=['bin/pygsm-gateway.py'],
     url='https://github.com/caktus/pygsm-gateway',
     license='LICENSE.txt',
     description='Simple HTTP gateway to PyGSM',
