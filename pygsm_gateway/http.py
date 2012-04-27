@@ -1,8 +1,10 @@
+import socket
+import cgi
+import logging
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from SocketServer import ThreadingMixIn
-import cgi
 from urlparse import urlparse, parse_qs
-import logging
+
 
 logger = logging.getLogger('pygsm_gateway.http')
 
@@ -30,6 +32,7 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                     self.send_response(400)
                 self.end_headers()
                 self.wfile.write('\n')
+                self.close()
                 return
 
             #added to play nicely with rapidsms_httprouter, although this perhaps is semantically incorrect.
@@ -44,6 +47,16 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                     self.send_response(400)
                 self.end_headers()
                 self.wfile.write('\n')
+                self.close()
                 return
+
+        def handle(self):
+            """Handles a request ignoring dropped connections."""
+
+            try:
+                return BaseHTTPRequestHandler.handle(self)
+            except (socket.error, socket.timeout) as e:
+                self.connection_dropped(e)
+
 
         HTTPServer.__init__(self, address, Handler)
