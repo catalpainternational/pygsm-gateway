@@ -32,12 +32,12 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                     self.send_response(400)
                 self.end_headers()
                 self.wfile.write('\n')
-                self.close()
+                self.wfile.close()
                 return
 
             #added to play nicely with rapidsms_httprouter, although this perhaps is semantically incorrect.
             def do_GET(self):
-                logger.debug('got GET')
+                logger.debug('Got GET')
                 form = parse_qs(urlparse(self.path).query)
                 if 'identity' in form and 'text' in form:
                     self._send_method(form['identity'][0],
@@ -47,7 +47,7 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                     self.send_response(400)
                 self.end_headers()
                 self.wfile.write('\n')
-                self.close()
+                self.wfile.close()
                 return
 
         def handle(self):
