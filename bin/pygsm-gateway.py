@@ -43,7 +43,7 @@ if __name__ == '__main__':
             'port': port,
             'baudrate': 115200,
             'rtscts': 1,
-            'timeout': 10,
+            'timeout': 20,
         }
     }
     gsm_thread = GsmPollingThread(**args)
