@@ -5,6 +5,7 @@ import urllib2
 import logging
 import threading
 from pygsm import errors
+import serial
 
 # modified by Nicolas Hoibian
 
@@ -50,14 +51,15 @@ class MetaGsmPollingThread(threading.Thread):
                 
                 if self.running is False:
                     self.stop()
-            except errors.GsmModemError, errors.GsmReadTimeoutError:
+            except (errors.GsmModemError, errors.GsmReadTimeoutError, serial.SerialException):
                 print "######## GSM ERROR - cleaning up and starting over"
                 try:
                     if self.gsmThread is not None:
                         self.gsmThread.stop()
                     self.gsmThread = None
                     logger.info("Gsm Exception while running - cleaning the child thread and waiting")
-
+                    time.sleep(BLOCK_TIME_VERY_LONG)
+                    continue
                 except errors.GsmModemError, errors.GsmReadTimeoutError:
                     print "######## GSM ERROR while cleaning up. Sleeping it off"
                     time.sleep(BLOCK_TIME_VERY_LONG)
