@@ -3,7 +3,8 @@ import platform
 import logging
 
 from pygsm_gateway.http import PygsmHttpServer
-from pygsm_gateway.gsm import GsmPollingThread
+#from pygsm_gateway.gsm import GsmPollingThread
+from pygsm_gateway.gsm import MetaGsmPollingThread
 from serial.tools import list_ports
 
 
@@ -46,8 +47,11 @@ if __name__ == '__main__':
             'timeout': 20,
         }
     }
-    gsm_thread = GsmPollingThread(**args)
+    # gsm_thread = GsmPollingThread(**args)
+    # gsm_thread.start()
+    gsm_thread = MetaGsmPollingThread(args)
     gsm_thread.start()
+
 
     server = PygsmHttpServer(('localhost', 8080), gsm_thread.send)
     print 'Starting server, use <Ctrl-C> to stop'

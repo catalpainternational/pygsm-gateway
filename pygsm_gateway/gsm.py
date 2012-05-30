@@ -4,10 +4,65 @@ import urllib
 import urllib2
 import logging
 import threading
+from pygsm import errors
+
+# modified by Nicolas Hoibian
 
 import pygsm
 
 logger = logging.getLogger('pygsm_gateway.gsm')
+
+# Time to wait on the modem when polling it
+# default is 0.1
+BLOCK_TIME = 1
+BLOCK_TIME_SHORT = 0.5
+BLOCK_TIME_LONG = 2
+
+# number of seconds to wait between
+# polling the modem for incoming SMS
+# (if BLOCK_TIME is 0.1)
+POLL_INTERVAL = 5
+
+# time to wait for the start method to
+# complete before assuming that it failed
+MAX_CONNECT_TIME = 10
+
+class MetaGsmPollingThread(threading.Thread):
+    
+    def __init__(self,args):
+        self.passthrough_args = args
+        self.running=True
+        self.gsmThread = None
+        super(MetaGsmPollingThread, self).__init__()
+
+    def run(self):
+        while self.running is True:
+            try:
+                self.gsmThread = GsmPollingThread(**self.passthrough_args)
+                self.gsmThread.start()
+                print "########## Started the children thread -- GsmPollingThread"
+                while self.running is True and self.gsmThread is not None and self.gsmThread.running is True:
+                    time.sleep(BLOCK_TIME_LONG)
+            except errors.GsmModemError:
+                time.sleep(BLOCK_TIME_LONG*2)
+            except KeyboardInterrupt, er:
+                print "Keyboard interrupt:",er
+                raise(er)
+        
+    def send(self, identity, text):
+        logger.info("Got some send:"+ identity + text)
+        # Wait until we have a thread to talk to or MAX_CONNECT_TIME * BLOCK_TIME_SHORT
+        n = 0
+        while self.gsmThread is None and n < MAX_CONNECT_TIME:
+            time.sleep(BLOCK_TIME_SHORT)
+            n+=1
+            logger.info("The thread is not ready to send yet. ("+str(n)+")")
+        # We didn't wait long enough
+        if self.gsmThread is None or self.gsmThread.running is False:
+            logger.info("The thread was not ready in time")
+            return False
+
+        return self.gsmThread.send(identity, text)
 
 
 class GsmPollingThread(threading.Thread):
@@ -17,9 +72,7 @@ class GsmPollingThread(threading.Thread):
     # polling the modem for incoming SMS
     POLL_INTERVAL = 5
 
-    # time to wait for the start method to
-    # complete before assuming that it failed
-    MAX_CONNECT_TIME = 10
+    
 
     def __init__(self, url, url_args, modem_args):
         self.url = url
@@ -30,22 +83,22 @@ class GsmPollingThread(threading.Thread):
         # set a default timeout if it wasn't specified in localsettings.py;
         # otherwise read() will hang forever if the modem is powered off
         if "timeout" not in self.modem_kwargs:
-            self.modem_kwargs["timeout"] = '10'
+            self.modem_kwargs["timeout"] = '3'
         super(GsmPollingThread, self).__init__()
 
     def _wait_for_modem(self):
         """
         Blocks until this backend has connected to and initialized the modem,
-        waiting for a maximum of self.MAX_CONNECT_TIME (default=10) seconds.
+        waiting for a maximum of MAX_CONNECT_TIME (default=10) seconds.
         Returns true when modem is ready, or false if it times out.
         """
 
         # if the modem isn't present yet, this message is probably being sent by
         # an application during startup from the main thread, before this thread
         # has connected to the modem. block for a short while before giving up.
-        for n in range(0, self.MAX_CONNECT_TIME * 10):
+        for n in range(0, MAX_CONNECT_TIME * 10):
             if self.modem is not None: return True
-            time.sleep(0.1)
+            time.sleep(BLOCK_TIME)
 
         # timed out. we're still not connected
         # this is bad news, but not fatal, so warn
@@ -85,23 +138,30 @@ class GsmPollingThread(threading.Thread):
 
     def send(self, identity, text):
 
+        print "My sending"
         # if this message is being sent from the start method of
         # an app (which is run in the main thread), this backend
         # may not have had time to start up yet. wait for it
         if not self._wait_for_modem():
+            logger.debug('Modem was not ready when tried to send')
             return False
-
+            
         # attempt to send the message
         # failure is bad, but not fatal
-        if str(identity).startswith('+') == False:
-            identity = '+' + str(identity)
-        was_sent = self.modem.send_sms(str(identity), text)
-
-        if was_sent:
-            self.sent_messages += 1
-        else:
-            self.failed_messages += 1
-
+        try:
+            if str(identity).startswith('+') == False:
+                identity = '+' + str(identity)
+            was_sent = self.modem.send_sms(str(identity), text)
+            print "Was sent - a -",was_sent
+            if was_sent:
+                self.sent_messages += 1
+            else:
+                self.failed_messages += 1
+        except errors.GsmError, err:
+            print "some kind of error"
+            print err
+            return False
+        print "Was sent:",was_sent
         return was_sent
 
     def message(self, identity, text):
@@ -167,6 +227,12 @@ class GsmPollingThread(threading.Thread):
         return vars
 
     def start(self):
+        self.init_modem()
+        # Now that the modem has been booted, start the thread
+        super(GsmPollingThread, self).start()
+        logger.info("READ run loop started")
+
+    def init_modem(self):
         try:
             self.sent_messages = 0
             self.failed_messages = 0
@@ -188,10 +254,10 @@ class GsmPollingThread(threading.Thread):
             self.stop()
             raise
 
-        # Now that the modem has been booted, start the thread
-        super(GsmPollingThread, self).start()
-
     def run(self):
+        # lets be short lived. 
+        MAX_ITER = 5
+        it = 0
         try:
             self.running = True
             while self.running:
@@ -210,25 +276,28 @@ class GsmPollingThread(threading.Thread):
                         id = self.get_inbox_ids().pop(0)
                         self.modem.command('AT+CMGD=' + str(id))
                         logger.debug("Deleted message id: %s" % id)
-
+                
                 # wait for POLL_INTERVAL seconds before continuing
                 # (in a slightly bizarre way, to ensure that we abort
                 # as soon as possible when the backend is asked to stop)
-                for n in range(0, self.POLL_INTERVAL * 10):
+                for n in range(0, POLL_INTERVAL * 10):
                     if not self.running: return None
-                    time.sleep(0.1)
+                    time.sleep(BLOCK_TIME_SHORT)
+                it +=1
+                print it
+                if it == 5:
+                    raise
         except:
             logger.exception('Caught exception in GSM polling loop')
             raise
         finally:
             self.stop()
-
+            
         logger.info("Run loop terminated.")
 
     def stop(self):
 
         self.running = False
-
         # disconnect from modem
         if self.modem is not None:
             self.modem.disconnect()
