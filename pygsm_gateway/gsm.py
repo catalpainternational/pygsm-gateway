@@ -47,9 +47,9 @@ class MetaGsmPollingThread(threading.Thread):
                 while self.running is True and self.gsmThread is not None and self.gsmThread.running is True:
                     time.sleep(BLOCK_TIME_LONG)
                     print "slept a bit. self.running=",self.running
-
+                
                 if self.running is False:
-                    self.gsmThread.running = False
+                    self.stop()
             except errors.GsmModemError, errors.GsmReadTimeoutError:
                 print "######## GSM ERROR - cleaning up and starting over"
                 try:
@@ -64,11 +64,12 @@ class MetaGsmPollingThread(threading.Thread):
                     continue
                 except KeyboardInterrupt as er:
                     print "Keyboard interrupt while sleeping after failing to boot the modem"
-                    self.running=False
+                    self.stop()
+                    
                     raise(er)                    
             except KeyboardInterrupt as er:
                 print "Keyboard interrupt while running normally"
-                self.running=False
+                self.stop()
                 raise(er)
                     
     def send(self, identity, text):
@@ -85,7 +86,10 @@ class MetaGsmPollingThread(threading.Thread):
             return False
 
         return self.gsmThread.send(identity, text)
-
+    def stop(self):
+        self.running = False
+        if self.gsmThread is not None:
+            self.gsmThread.stop()
 
 class GsmPollingThread(threading.Thread):
     _title = "pyGSM"
