@@ -120,7 +120,7 @@ class GsmPollingThread(threading.Thread):
         # if the modem isn't present yet, this message is probably being sent by
         # an application during startup from the main thread, before this thread
         # has connected to the modem. block for a short while before giving up.
-        for n in range(0, MAX_CONNECT_TIME / BLOCK_TIME):
+        for n in range(0, int(MAX_CONNECT_TIME / BLOCK_TIME)):
             if self.modem is not None: return True
             time.sleep(BLOCK_TIME)
 
@@ -305,7 +305,7 @@ class GsmPollingThread(threading.Thread):
                 # wait for POLL_INTERVAL seconds before continuing
                 # (in a slightly bizarre way, to ensure that we abort
                 # as soon as possible when the backend is asked to stop)
-                for n in range(0, POLL_INTERVAL / BLOCK_TIME_SHORT):
+                for n in range(0, int(POLL_INTERVAL / BLOCK_TIME_SHORT)):
                     if not self.running: return None
                     time.sleep(BLOCK_TIME_SHORT)
         except (errors.GsmModemError, errors.GsmReadTimeoutError, serial.SerialException):
