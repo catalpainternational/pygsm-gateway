@@ -32,7 +32,7 @@ elif platform.platform().startswith('Darwin'):
     port = '/dev/tty.HUAWEIMobile-Modem'
 # Linux should be somethign like this but this still needs to be fleshed out
 else:
-    port = '/dev/tty.USB1'
+    port = '/dev/ttyUSB0'
 
 
 if __name__ == '__main__':
