@@ -59,13 +59,17 @@ class GsmPollingThread(threading.Thread):
 
         boxdata = self.modem.query('AT+CMGD=?')
 
-        if "error" in boxdata.lower():
-            print "Error - phone not supported"
-            exit()
+        try:
+            if "error" in boxdata.lower():
+                print "Error - phone not responding as expected"
+                return []
 
-        message_ids = boxdata.split("(")[1].split(")")[0].split("-")[0].split(',')
+            message_ids = boxdata.split("(")[1].split(")")[0].split("-")[0].split(',')
 
-        logger.debug('SIM Inbox size: %s message ids: %s' % (message_ids.__len__(), message_ids))
+            logger.debug('SIM Inbox size: %s message ids: %s' % (message_ids.__len__(), message_ids))
+        except:
+            print 'Error in pygsm-gateway.gsm.get_inbox_ids modem not responding as expected'
+            message_ids = []
 
         return message_ids
 
@@ -207,9 +211,10 @@ class GsmPollingThread(threading.Thread):
 
                     # if the message was processed successfully remove it from the sim card
                     if success != False:
-                        id = self.get_inbox_ids().pop(0)
-                        self.modem.command('AT+CMGD=' + str(id))
-                        logger.debug("Deleted message id: %s" % id)
+                        if self.get_inbox_ids():
+                            id = self.get_inbox_ids().pop(0)
+                            self.modem.command('AT+CMGD=' + str(id))
+                            logger.debug("Deleted message id: %s" % id)
 
                 # wait for POLL_INTERVAL seconds before continuing
                 # (in a slightly bizarre way, to ensure that we abort
@@ -221,7 +226,8 @@ class GsmPollingThread(threading.Thread):
             logger.exception('Caught exception in GSM polling loop')
             raise
         finally:
-            self.stop()
+            pass
+            #self.stop()
 
         logger.info("Run loop terminated.")
 
