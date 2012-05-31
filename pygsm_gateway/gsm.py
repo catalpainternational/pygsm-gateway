@@ -16,7 +16,7 @@ logger = logging.getLogger('pygsm_gateway.gsm')
 BLOCK_TIME = 1
 BLOCK_TIME_SHORT = 0.5
 BLOCK_TIME_LONG = 2
-BLOCK_TIME_VERY_LONG = 8
+BLOCK_TIME_VERY_LONG = 10
 
 # number of seconds to wait between
 # polling the modem for incoming SMS
@@ -25,6 +25,8 @@ POLL_INTERVAL = 5
 # time to wait for the start method to
 # complete before assuming that it failed
 MAX_CONNECT_TIME = 10
+
+STATUS_NOK ="NOK"
 
 class MetaGsmPollingThread(threading.Thread):
     _title="metaPyGSM"
@@ -44,32 +46,45 @@ class MetaGsmPollingThread(threading.Thread):
                 logger.info("########## Started the children thread -- GsmPollingThread")
                 while self.running is True and self.gsmThread is not None and self.gsmThread.running is True:
                     time.sleep(BLOCK_TIME_LONG)
-                
+
+                logger.info("## outside the Meta loop. self.running:"+str(self.running)+ " self.gsmThread:"+str(self.gsmThread)+" self.gsmThread.running"+ str(self.gsmThread.running))  
                 if self.running is False:
                     self.stop()
             except (errors.GsmModemError, errors.GsmReadTimeoutError, serial.SerialException):
-                logger.exception("######## GSM ERROR - cleaning up and starting over")
+                logger.exception("########## GSM ERROR - cleaning up and starting over")
                 try:
                     if self.gsmThread is not None:
                         self.gsmThread.stop()
                     self.gsmThread = None
-                    logger.info("Gsm Exception while running - cleaning the child thread and waiting")
                     time.sleep(BLOCK_TIME_VERY_LONG)
                     continue
                 except errors.GsmModemError, errors.GsmReadTimeoutError:
-                    logger.exception("######## GSM ERROR while cleaning up. Sleeping it off")
+                    logger.exception("########## GSM ERROR while cleaning up. Sleeping it off")
                     time.sleep(BLOCK_TIME_VERY_LONG)
                     continue
                 except KeyboardInterrupt as er:
                     logger.exception("Keyboard interrupt while sleeping after failing to boot the modem")
                     self.stop()
-                    
                     raise(er)                    
             except KeyboardInterrupt as er:
                 logger.exception("Keyboard interrupt while running normally")
                 self.stop()
                 raise(er)
-                    
+
+    def status(self):
+        """
+        What is the status?
+        """
+        
+        if self.gsmThread is None:
+            return STATUS_NOK
+        else:
+            status = self.gsmThread.status()
+            if status is None:
+                return STATUS_NOK
+            else:
+                return status
+        
     def send(self, identity, text):
         logger.info("Got some send:"+ identity + text)
         # Wait until we have a thread to talk to or MAX_CONNECT_TIME * BLOCK_TIME_SHORT
@@ -86,9 +101,10 @@ class MetaGsmPollingThread(threading.Thread):
         return self.gsmThread.send(identity, text)
     def stop(self):
         self.running = False
+        logger.debug("Trying to stop the meta thread")
         if self.gsmThread is not None:
             self.gsmThread.stop()
-
+        
 class GsmPollingThread(threading.Thread):
     _title = "pyGSM"
 
@@ -135,14 +151,12 @@ class GsmPollingThread(threading.Thread):
         """
 
         boxdata = self.modem.query('AT+CMGD=?')
-
         try:
             if "error" in boxdata.lower():
                 print "Error - phone not responding as expected"
                 return []
 
             message_ids = boxdata.split("(")[1].split(")")[0].split("-")[0].split(',')
-
             logger.debug('SIM Inbox size: %s message ids: %s' % (message_ids.__len__(), message_ids))
         except:
             logger.exception('Modem not responding as expected to inbox query')
@@ -243,7 +257,7 @@ class GsmPollingThread(threading.Thread):
 
         vars = {
             "_signal":  level,
-            "_title":   self.title,
+            "_title":   self._title,
             "Messages Sent": self.sent_messages,
             "Messages Received": self.received_messages}
 
@@ -278,7 +292,7 @@ class GsmPollingThread(threading.Thread):
 
         # Now that the modem has been booted, start the thread
         super(GsmPollingThread, self).start()
-        logger.info("GsmPollingThread run loop started")
+        logger.info("########## GsmPollingThread run loop started")
 
 
     def run(self):
@@ -309,14 +323,14 @@ class GsmPollingThread(threading.Thread):
                     if not self.running: return None
                     time.sleep(BLOCK_TIME_SHORT)
         except (errors.GsmModemError, errors.GsmReadTimeoutError, serial.SerialException):
-            logger.exception('Caught exception in GSM polling loop')
+            logger.exception('## Caught exception in GSM polling loop')
         finally:
             self.stop()
             
-        logger.info("Run loop terminated.")
+        logger.info("########## Read loop terminated.")
 
     def stop(self):
-
+        logger.info("## Stopping - After "+str(self.sent_messages) +" sent & "+str(self.failed_messages)+" failed message.")
         self.running = False
         # disconnect from modem
         if self.modem is not None:
