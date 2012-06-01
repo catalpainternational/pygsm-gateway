@@ -49,11 +49,13 @@ if __name__ == '__main__':
     }
     # gsm_thread = GsmPollingThread(**args)
     # gsm_thread.start()
+
     gsm_thread = MetaGsmPollingThread(args)
     gsm_thread.start()
 
 
-    server = PygsmHttpServer(('localhost', 8080), gsm_thread.send)
+
+    server = PygsmHttpServer(('localhost', 8080), gsm_thread.send,gsm_thread.status)
     print 'Starting server, use <Ctrl-C> to stop'
     try:
         server.serve_forever()

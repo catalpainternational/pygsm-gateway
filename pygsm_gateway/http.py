@@ -12,10 +12,10 @@ logger = logging.getLogger('pygsm_gateway.http')
 class PygsmHttpServer(ThreadingMixIn, HTTPServer):
     """Handle requests in a separate thread."""
 
-    def __init__(self, address, send_method):
+    def __init__(self, address, send_method, status_method):
         class Handler(BaseHTTPRequestHandler):
             _send_method = send_method
-
+            _status_method = status_method
             def do_POST(self):
                 logger.debug('got POST')
                 form = cgi.FieldStorage(
@@ -37,12 +37,27 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
 
             #added to play nicely with rapidsms_httprouter, although this perhaps is semantically incorrect.
             def do_GET(self):
-                logger.debug('Got GET')
+                logger.debug('Got GET:'+self.path)
+                if self.path == '/status':
+                    status = self._status_method()
+                    logger.debug(status)
+                    if status is "NOK":
+                        self.send_response(200)
+                        self.send_header("_status","Not OK")
+                        self.end_headers()
+                        return
+                    else:
+                        self.send_response(200,str(status))
+                        self.send_header("_status","Maybe ok")
+                        for key,value in status.items():
+                            self.send_header(key,value)
+                        self.end_headers()
+                        return
                 form = parse_qs(urlparse(self.path).query)
                 if 'identity' in form and 'text' in form:
                     self._send_method(form['identity'][0],
                                       form['text'][0])
-                    self.send_response(200)
+                    self.send_response(200)                 
                 else:
                     self.send_response(400)
                 self.end_headers()
