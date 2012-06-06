@@ -54,6 +54,13 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                         self.end_headers()
                         return
                 form = parse_qs(urlparse(self.path).query)
+                if 'text' not in form:
+                    self.send_response(400)
+                    return
+                if form['text'][0] is None or form['text'][0]=='':
+                    print "Form text:["+form['text']+"]"
+                    self.send_response(400)
+                    return
                 if 'identity' in form and 'text' in form:
                     self._send_method(form['identity'][0],
                                       form['text'][0])
