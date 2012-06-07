@@ -16,6 +16,12 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
         class Handler(BaseHTTPRequestHandler):
             _send_method = send_method
             _status_method = status_method
+
+            def request_close(self):
+                self.end_headers()
+                self.wfile.write('\n')
+                self.wfile.close()
+
             def do_POST(self):
                 logger.debug('got POST')
                 form = cgi.FieldStorage(
@@ -25,7 +31,7 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                              'CONTENT_TYPE': self.headers['Content-Type'],
                              })
                 if 'identity' in form and 'text' in form:
-                    self._send_method(form['identity'].value,
+                    ok = self._send_method(form['identity'].value,
                                       form['text'].value)
                     self.send_response(200)
                 else:
@@ -44,27 +50,36 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                     if status is "NOK":
                         self.send_response(200)
                         self.send_header("_status","Not OK")
-                        self.end_headers()
+                        self.request_close()
                         return
                     else:
                         self.send_response(200,str(status))
                         self.send_header("_status","Maybe ok")
                         for key,value in status.items():
                             self.send_header(key,value)
-                        self.end_headers()
+                        self.request_close()
                         return
                 form = parse_qs(urlparse(self.path).query)
+
+                ## Next two ifs: handling empty messages
                 if 'text' not in form:
                     self.send_response(400)
+                    self.request_close()
                     return
                 if form['text'][0] is None or form['text'][0]=='':
                     print "Form text:["+form['text']+"]"
                     self.send_response(400)
+                    self.request_close()
                     return
+
                 if 'identity' in form and 'text' in form:
-                    self._send_method(form['identity'][0],
+                    result = self._send_method(form['identity'][0],
                                       form['text'][0])
-                    self.send_response(200)                 
+                    # This is where we should return 200 / something else
+                    if result is True:
+                        self.send_response(200)
+                    else:
+                        self.send_response(424) #method error
                 else:
                     self.send_response(400)
                 self.end_headers()

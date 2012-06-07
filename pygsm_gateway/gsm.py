@@ -94,8 +94,12 @@ class MetaGsmPollingThread(threading.Thread):
             n+=1
             logger.warn("The thread is not ready to send yet. ("+str(n)+")")
         # We didn't wait long enough
-        if self.gsmThread is None or self.gsmThread.running is False:
-            logger.error("The GsmPollingThread was not set / ready in time")
+        if self.gsmThread is None:
+            logger.error("The GsmPollingThread is None")
+            #was not set / ready in time")
+            return False
+        if hasattr(self.gsmThread,"running") or self.gsmThread.running is False:
+            logger.error("The GsmPollingThread does not have its running attribute")
             return False
 
         return self.gsmThread.send(identity, text)
