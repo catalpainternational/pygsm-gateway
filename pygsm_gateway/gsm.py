@@ -98,11 +98,15 @@ class MetaGsmPollingThread(threading.Thread):
             logger.error("The GsmPollingThread is None")
             #was not set / ready in time")
             return False
-        if hasattr(self.gsmThread,"running") or self.gsmThread.running is False:
+        if not hasattr(self.gsmThread,"running"):
             logger.error("The GsmPollingThread does not have its running attribute")
             return False
-
+        if  self.gsmThread.running is False:
+            logger.error("The GsmPollingThread is not running")
+            return False
         return self.gsmThread.send(identity, text)
+
+
     def stop(self):
         self.running = False
         logger.debug("Trying to stop the meta thread")
@@ -115,7 +119,7 @@ class GsmPollingThread(threading.Thread):
     # number of seconds to wait between
     # polling the modem for incoming SMS
     POLL_INTERVAL = 5
-
+    running =False
     
 
     def __init__(self, url, url_args, modem_args):
