@@ -4,7 +4,7 @@ import logging
 
 from pygsm_gateway.http import PygsmHttpServer
 #from pygsm_gateway.gsm import GsmPollingThread
-from pygsm_gateway.gsm import MetaGsmPollingThread
+from pygsm_gateway.gsm import MetaGsmPollingThread, MetaSendingThread
 from serial.tools import list_ports
 
 
@@ -53,9 +53,12 @@ if __name__ == '__main__':
     gsm_thread = MetaGsmPollingThread(args)
     gsm_thread.start()
 
+    worker_thread = MetaSendingThread(gsm_thread)
+    gsm_thread.queue = worker_thread._queue
+    worker_thread.start()
 
 
-    server = PygsmHttpServer(('localhost', 8080), gsm_thread.send,gsm_thread.status)
+    server = PygsmHttpServer(('localhost', 8080), gsm_thread.enqueue,gsm_thread.status)
     print 'Starting server, use <Ctrl-C> to stop'
     try:
         server.serve_forever()
@@ -64,3 +67,6 @@ if __name__ == '__main__':
     finally:
         gsm_thread.running = False
         gsm_thread.join()
+        worker_thread.running = False
+        worker_thread.join()
+        worker_thread._queue.join()

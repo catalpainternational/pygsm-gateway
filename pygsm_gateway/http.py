@@ -4,7 +4,7 @@ import logging
 from BaseHTTPServer import HTTPServer, BaseHTTPRequestHandler
 from SocketServer import ThreadingMixIn
 from urlparse import urlparse, parse_qs
-
+import time
 
 logger = logging.getLogger('pygsm_gateway.http')
 
@@ -12,9 +12,9 @@ logger = logging.getLogger('pygsm_gateway.http')
 class PygsmHttpServer(ThreadingMixIn, HTTPServer):
     """Handle requests in a separate thread."""
 
-    def __init__(self, address, send_method, status_method):
+    def __init__(self, address, enqueue_method, status_method):
         class Handler(BaseHTTPRequestHandler):
-            _send_method = send_method
+            _enqueue_method = enqueue_method
             _status_method = status_method
 
             def request_close(self):
@@ -73,10 +73,13 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                     return
 
                 if 'identity' in form and 'text' in form:
-                    result = self._send_method(form['identity'][0],
-                                      form['text'][0])
+                    task = self._enqueue_method(form['identity'][0],
+                                      form['text'][0],self)
+                    while not task.is_done:
+                        time.sleep(0.25)
+                    
                     # This is where we should return 200 / something else
-                    if result is True:
+                    if task.result is True:
                         self.send_response(200)
                     else:
                         self.send_response(424) #method error
@@ -93,6 +96,8 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
             try:
                 return BaseHTTPRequestHandler.handle(self)
             except (socket.error, socket.timeout) as e:
+                print "there was an exception:"
+                print e
                 self.connection_dropped(e)
 
 

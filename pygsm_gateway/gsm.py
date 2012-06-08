@@ -1,3 +1,4 @@
+#import sys
 import time
 import copy
 import urllib
@@ -6,6 +7,8 @@ import logging
 import threading
 from pygsm import errors
 import serial
+
+from Queue import Queue
 
 import pygsm
 
@@ -28,9 +31,44 @@ MAX_CONNECT_TIME = 10
 
 STATUS_NOK ="NOK"
 
+
+class Task():
+    is_done = False
+    result=False
+
+    def __init__(self,identity,message,sender):
+        self._identity = identity
+        self._message = message
+        self._sender_thread = sender
+        
+        #super(Task, self).__init__()
+        
+class MetaSendingThread(threading.Thread):
+    _title="metaSender"
+    _sender = None
+
+    def __init__(self,sender):
+        self._sender = sender
+        self.running=True
+        self._queue = Queue()
+        super(MetaSendingThread, self).__init__()
+
+    def run(self):
+        while self.running is True:
+            if self._queue.empty():
+                time.sleep(BLOCK_TIME_SHORT)
+            else:
+                task = self._queue.get()
+                print "got task:",task
+                result = self._sender.send(task._identity,task._message)
+                print "got results",result
+                task.result = result
+                task.is_done = True
+                self._queue.task_done()    
+
 class MetaGsmPollingThread(threading.Thread):
     _title="metaPyGSM"
-
+    queue = None
     def __init__(self,args):
         self.passthrough_args = args
         self.running=True
@@ -65,7 +103,9 @@ class MetaGsmPollingThread(threading.Thread):
                 except KeyboardInterrupt as er:
                     logger.exception("Keyboard interrupt while sleeping after failing to boot the modem")
                     self.stop()
-                    raise(er)                    
+                    #sys.exit()
+                    raise(er)
+                    
             except KeyboardInterrupt as er:
                 logger.exception("Keyboard interrupt while running normally")
                 self.stop()
@@ -84,6 +124,11 @@ class MetaGsmPollingThread(threading.Thread):
                 return STATUS_NOK
             else:
                 return status
+        
+    def enqueue(self, identity, text, thread):
+        task = Task(identity, text,thread)
+        self.queue.put(task)
+        return task
         
     def send(self, identity, text):
         logger.info("Got some send:"+ identity + text)
