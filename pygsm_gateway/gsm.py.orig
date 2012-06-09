@@ -32,86 +32,68 @@ MAX_CONNECT_TIME = 10
 STATUS_NOK ="NOK"
 
 
-
-class SendTask():
-    op = "send"
+class Task():
     is_done = False
     result=False
-        
+
     def __init__(self,identity,message,sender):
         self._identity = identity
         self._message = message
         self._sender_thread = sender
         
-
-class ReadTask():
-    op = "read"
-    is_done = False
-    
-    def __init__(self):
-        self._sender_thread = sender
-
-class StatusTask():
-    op = "status"
-    is_done = False
-    result=None
-    
-    def __init__(self,sender):
-        self._sender_thread = sender
+        #super(Task, self).__init__()
         
+class MetaSendingThread(threading.Thread):
+    _title="metaSender"
+    _sender = None
 
-
-class ProcessingThread(threading.Thread):
-    _title="ProcessingQueue"
-    _accessor = None
-
-    def __init__(self, meta_accessor):
-        self._meta_accessor = meta_accessor
+    def __init__(self,sender):
+        self._sender = sender
         self.running=True
         self._queue = Queue()
-        super(ProcessingThread, self).__init__()
+        super(MetaSendingThread, self).__init__()
 
     def run(self):
         while self.running is True:
             if self._queue.empty():
                 time.sleep(BLOCK_TIME_SHORT)
-
             else:
                 task = self._queue.get()
-                print "Running task:",task
-                self._meta_accessor.act(task)
+                print "got task:",task
+                result = self._sender.send(task._identity,task._message)
+                print "got results",result
+                task.result = result
+                task.is_done = True
                 self._queue.task_done()    
 
-                    
 class MetaGsmPollingThread(threading.Thread):
     _title="metaPyGSM"
     queue = None
-
     def __init__(self,args):
         self.passthrough_args = args
         self.running=True
-        self.modem_proxy = None
+        self.gsmThread = None
         super(MetaGsmPollingThread, self).__init__()
 
     def run(self):
         while self.running is True:
             logger.info("Starting a Polling Thread creation")
             try:
-                self.modem_proxy = ModemProxy(**self.passthrough_args)
-                self.modem_proxy.boot_modem()
+                self.gsmThread = GsmPollingThread(**self.passthrough_args)
+                self.gsmThread.start()
                 logger.info("########## Started the children thread -- GsmPollingThread")
-                while self.running is True and self.modem_proxy is not None and self.modem_proxy.modem_ok is True:
-                    time.sleep(BLOCK_TIME)
+                while self.running is True and self.gsmThread is not None and self.gsmThread.running is True:
+                    time.sleep(BLOCK_TIME_LONG)
 
-                logger.info("## outside the Meta loop. self.running:"+str(self.running)+ " self.modem_proxy:"+str(self.modem_proxy)+" self.modem_proxy.running"+ str(self.modem_proxy.running))  
+                logger.info("## outside the Meta loop. self.running:"+str(self.running)+ " self.gsmThread:"+str(self.gsmThread)+" self.gsmThread.running"+ str(self.gsmThread.running))  
                 if self.running is False:
                     self.stop()
             except (errors.GsmModemError, errors.GsmReadTimeoutError, serial.SerialException):
                 logger.exception("########## GSM ERROR - cleaning up and starting over")
                 try:
-                    if self.modem_proxy is not None:
-                        self.modem_proxy.stop()
-                    self.modem_proxy = None
+                    if self.gsmThread is not None:
+                        self.gsmThread.stop()
+                    self.gsmThread = None
                     time.sleep(BLOCK_TIME_VERY_LONG)
                     continue
                 except errors.GsmModemError, errors.GsmReadTimeoutError:
@@ -129,75 +111,60 @@ class MetaGsmPollingThread(threading.Thread):
                 self.stop()
                 raise(er)
 
+    def status(self):
+        """
+        What is the status?
+        """
         
-    def enqueue_send(self, identity, text, thread):
-        task = SendTask(identity, text,thread)
-        self.queue.put(task)
-        return task
-
-    def enqueue_status(self, thread):
-        task = StatusTask(thread)
-        self.queue.put(task)
-        return task
-        
-    def act(self, task):
-        logger.info("Got some send:"+ identity + text)
-
-        if task.op == "status" and self.modem_proxy is None:
+        if self.gsmThread is None:
             return STATUS_NOK
-
-        # Wait until we have a modem to talk to or MAX_CONNECT_TIME * BLOCK_TIME_SHORT
-            n = 0
-
-        while self.modem_proxy is None and n < MAX_CONNECT_TIME and not hasattr(self.modem_proxy,"modem_ok"):
+        else:
+            status = self.gsmThread.status()
+            if status is None:
+                return STATUS_NOK
+            else:
+                return status
+        
+    def enqueue(self, identity, text, thread):
+        task = Task(identity, text,thread)
+        self.queue.put(task)
+        return task
+        
+    def send(self, identity, text):
+        logger.info("Got some send:"+ identity + text)
+        # Wait until we have a thread to talk to or MAX_CONNECT_TIME * BLOCK_TIME_SHORT
+        n = 0
+        while self.gsmThread is None and n < MAX_CONNECT_TIME:
             time.sleep(BLOCK_TIME_SHORT)
             n+=1
-            logger.warn("The modem is not ready to send yet. ("+str(n)+")")
+            logger.warn("The thread is not ready to send yet. ("+str(n)+")")
         # We didn't wait long enough
-        if self.modem_proxy is None:
-            logger.error("The modem is None")
+        if self.gsmThread is None:
+            logger.error("The GsmPollingThread is None")
             #was not set / ready in time")
             return False
-        if not hasattr(self.modem_proxy,"modem_ok"):
-            logger.error("The modem has not finished booting")
+        if not hasattr(self.gsmThread,"running"):
+            logger.error("The GsmPollingThread does not have its running attribute")
             return False
-        if  self.modem_proxy.modem_ok is False:
-            logger.error("The modem booted but failed")
+        if  self.gsmThread.running is False:
+            logger.error("The GsmPollingThread is not running")
             return False
+        return self.gsmThread.send(identity, text)
 
 
-        if task.op == "send":
-            result = self.modem_proxy.send(task._identity,task._message)
-            task.result = result
-        elif task.op == "status":
-            result = self.modem_proxy.status()
-            if status is None:
-                result = STATUS_NOK
-            task.result = result
-
-        elif task.op == "read":
-            accessor.read()
-        
-        task.is_done = True
-
-        
     def stop(self):
         self.running = False
-        logger.debug("Trying to stop the modem proxy")
-        if self.modem_proxy is not None:
-            self.modem_proxy.stop()
+        logger.debug("Trying to stop the meta thread")
+        if self.gsmThread is not None:
+            self.gsmThread.stop()
+        
+class GsmPollingThread(threading.Thread):
+    _title = "pyGSM"
 
-
-
-
-
-
-
-class ModemProxy():
-    _title = "Modem manager"
     # number of seconds to wait between
     # polling the modem for incoming SMS
     POLL_INTERVAL = 5
+    running =False
     
 
     def __init__(self, url, url_args, modem_args):
@@ -210,31 +177,7 @@ class ModemProxy():
         # otherwise read() will hang forever if the modem is powered off
         if "timeout" not in self.modem_kwargs:
             self.modem_kwargs["timeout"] = '10'
-
-
-    def boot_modem(self):
-        try:
-            self.sent_messages = 0
-            self.failed_messages = 0
-            self.received_messages = 0
-
-            logger.info("Connecting and booting via pyGSM...")
-            self.modem = pygsm.GsmModem(logger=self.gsm_log,
-                                        **self.modem_kwargs)
-            self.modem.boot()
-            self.modem_ok = True
-            # Clean up (delete) all read messages from the SIM so it doesn't get filled up.
-            # Don't do this unless we can't be both clever and on schedule
-            # self.clean_up_inbox() # we're attempting to be clever (see above comment)
-
-            if getattr(self, 'service_center', None) is not None:
-                self.modem.service_center = self.service_center
-        except:
-            logger.exception('Caught exception while booting modem')
-            self.stop()
-            raise
-
-        logger.info("########## GsmPollingThread run loop started")
+        super(GsmPollingThread, self).__init__()
 
     def _wait_for_modem(self):
         """
@@ -289,7 +232,7 @@ class ModemProxy():
                 logger.exception('During inbox cleaning')
                 pass
 
-    def send_message(self, identity, text):
+    def send(self, identity, text):
 
         logger.info(self._title+" sending a text")
         # if this message is being sent from the start method of
@@ -316,8 +259,8 @@ class ModemProxy():
         print "Was sent:",was_sent
         return was_sent
 
-    def message_received(self, identity, text):
-        """ handles SMS from modem """
+    def message(self, identity, text):
+        """ handle SMS from modem """
         url_args = copy.copy(self.url_args)
         url_args['identity'] = identity
         url_args['text'] = text
@@ -348,7 +291,7 @@ class ModemProxy():
     def gsm_log(self, modem, str, level):
         logger.debug("%s: %s" % (level, str))
 
-    def read_status(self):
+    def status(self):
 
         # abort if the modem isn't connected
         # yet. there's no status to fetch
@@ -379,34 +322,70 @@ class ModemProxy():
 
         return vars
 
-    def read_message(self):
+    def start(self):
         try:
-            msg = self.modem.next_message()
-            
-            if msg is not None:
-                self.received_messages += 1
+            self.sent_messages = 0
+            self.failed_messages = 0
+            self.received_messages = 0
 
-                # we got an sms! hand it off to the
-                # router to be dispatched to the apps
-                success = self.message_received(msg.sender, msg.text)
+            logger.info("Connecting and booting via pyGSM...")
+            self.modem = pygsm.GsmModem(logger=self.gsm_log,
+                                        **self.modem_kwargs)
+            self.modem.boot()
 
-                # if the message was processed successfully remove it from the sim card
-                if success != False:
-                    if self.get_inbox_ids():
-                        id = self.get_inbox_ids().pop(0)
-                        self.modem.command('AT+CMGD=' + str(id))
-                        logger.debug("Deleted message id: %s" % id)
-        # The modem is actually fiddly:
+            # Clean up (delete) all read messages from the SIM so it doesn't get filled up.
+            # Don't do this unless we can't be both clever and on schedule
+            # self.clean_up_inbox() # we're attempting to be clever (see above comment)
+
+            if getattr(self, 'service_center', None) is not None:
+                self.modem.service_center = self.service_center
+        except :
+            logger.exception('Caught exception while booting modem')
+            self.stop()
+            raise
+
+        # Now that the modem has been booted, start the thread
+        super(GsmPollingThread, self).start()
+        logger.info("########## GsmPollingThread run loop started")
+
+
+    def run(self):
+        try:
+            self.running = True
+            while self.running:
+                logger.info("Polling modem for messages")
+                msg = self.modem.next_message()
+
+                if msg is not None:
+                    self.received_messages += 1
+
+                    # we got an sms! hand it off to the
+                    # router to be dispatched to the apps
+                    success = self.message(msg.sender, msg.text)
+
+                    # if the message was processed successfully remove it from the sim card
+                    if success != False:
+                        if self.get_inbox_ids():
+                            id = self.get_inbox_ids().pop(0)
+                            self.modem.command('AT+CMGD=' + str(id))
+                            logger.debug("Deleted message id: %s" % id)
+
+                # wait for POLL_INTERVAL seconds before continuing
+                # (in a slightly bizarre way, to ensure that we abort
+                # as soon as possible when the backend is asked to stop)
+                for n in range(0, int(POLL_INTERVAL / BLOCK_TIME_SHORT)):
+                    if not self.running: return None
+                    time.sleep(BLOCK_TIME_SHORT)
         except (errors.GsmModemError, errors.GsmReadTimeoutError, serial.SerialException):
-            logger.exception('## Exception while looking SMS on the modem ')
+            logger.exception('## Caught exception in GSM polling loop')
         finally:
             self.stop()
             
         logger.info("########## Read loop terminated.")
 
     def stop(self):
-        logger.info("## Discarding modem - After "+str(self.sent_messages) +" sent & "+str(self.failed_messages)+" failed message.")
-        self.modem_ok = False
+        logger.info("## Stopping - After "+str(self.sent_messages) +" sent & "+str(self.failed_messages)+" failed message.")
+        self.running = False
         # disconnect from modem
         if self.modem is not None:
             self.modem.disconnect()

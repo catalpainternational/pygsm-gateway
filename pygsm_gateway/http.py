@@ -45,20 +45,23 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
             def do_GET(self):
                 logger.debug('Got GET:'+self.path)
                 if self.path == '/status':
-                    status = self._status_method()
-                    logger.debug(status)
-                    if status is "NOK":
-                        self.send_response(200)
+                    task = self._enqueue_status(self)
+                    while not task.is_done:
+                        time.sleep(0.25)
+                        
+                    logger.debug(task.result)
+                    self.send_response(200) # request was processed succesfully
+                    
+                    if task.result is "NOK":
                         self.send_header("_status","Not OK")
-                        self.request_close()
-                        return
                     else:
-                        self.send_response(200,str(status))
                         self.send_header("_status","Maybe ok")
                         for key,value in status.items():
                             self.send_header(key,value)
-                        self.request_close()
-                        return
+
+                    self.request_close()
+                    return
+
                 form = parse_qs(urlparse(self.path).query)
 
                 ## Next two ifs: handling empty messages
@@ -73,12 +76,11 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                     return
 
                 if 'identity' in form and 'text' in form:
-                    task = self._enqueue_method(form['identity'][0],
+                    task = self._enqueue_send(form['identity'][0],
                                       form['text'][0],self)
                     while not task.is_done:
                         time.sleep(0.25)
                     
-                    # This is where we should return 200 / something else
                     if task.result is True:
                         self.send_response(200)
                     else:
