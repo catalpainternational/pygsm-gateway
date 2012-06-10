@@ -32,6 +32,10 @@ MAX_CONNECT_TIME = 10
 STATUS_NOK ="NOK"
 
 
+class ReadTask():
+    op = "read"
+    is_done = False
+
 
 class SendTask():
     op = "send"
@@ -42,14 +46,7 @@ class SendTask():
         self._identity = identity
         self._message = message
         self._sender_thread = sender
-        
-
-class ReadTask():
-    op = "read"
-    is_done = False
-    
-    def __init__(self):
-        self._sender_thread = sender
+            
 
 class StatusTask():
     op = "status"
@@ -72,10 +69,9 @@ class ProcessingThread(threading.Thread):
         super(ProcessingThread, self).__init__()
 
     def run(self):
-        while self.running is True:
+        while self.running is True and self._meta_accessor.running is True:
             if self._queue.empty():
                 time.sleep(BLOCK_TIME_SHORT)
-
             else:
                 task = self._queue.get()
                 print "Running task:",task
@@ -99,15 +95,17 @@ class MetaGsmPollingThread(threading.Thread):
             try:
                 self.modem_proxy = ModemProxy(**self.passthrough_args)
                 self.modem_proxy.boot_modem()
-                logger.info("########## Started the children thread -- GsmPollingThread")
+                logger.info("## Booted the modem")
                 while self.running is True and self.modem_proxy is not None and self.modem_proxy.modem_ok is True:
-                    time.sleep(BLOCK_TIME)
-
-                logger.info("## outside the Meta loop. self.running:"+str(self.running)+ " self.modem_proxy:"+str(self.modem_proxy)+" self.modem_proxy.running"+ str(self.modem_proxy.running))  
+                    if self.queue.empty():
+                        self.enqueue_read()
+                    time.sleep(BLOCK_TIME*2)
+                    
+                logger.info("## outside the Meta loop. self.running:"+str(self.running)+ " self.modem_proxy:"+str(self.modem_proxy)+" self.modem_proxy.modem_ok"+ str(self.modem_proxy.modem_ok))  
                 if self.running is False:
                     self.stop()
             except (errors.GsmModemError, errors.GsmReadTimeoutError, serial.SerialException):
-                logger.exception("########## GSM ERROR - cleaning up and starting over")
+                logger.exception("## GSM ERROR - cleaning up and starting over")
                 try:
                     if self.modem_proxy is not None:
                         self.modem_proxy.stop()
@@ -115,11 +113,11 @@ class MetaGsmPollingThread(threading.Thread):
                     time.sleep(BLOCK_TIME_VERY_LONG)
                     continue
                 except errors.GsmModemError, errors.GsmReadTimeoutError:
-                    logger.exception("########## GSM ERROR while cleaning up. Sleeping it off")
+                    logger.exception("## GSM ERROR while cleaning up. Sleeping it off")
                     time.sleep(BLOCK_TIME_VERY_LONG)
                     continue
                 except KeyboardInterrupt as er:
-                    logger.exception("Keyboard interrupt while sleeping after failing to boot the modem")
+                    logger.exception("## Keyboard interrupt while sleeping after failing to boot the modem")
                     self.stop()
                     #sys.exit()
                     raise(er)
@@ -129,7 +127,8 @@ class MetaGsmPollingThread(threading.Thread):
                 self.stop()
                 raise(er)
 
-        
+
+                
     def enqueue_send(self, identity, text, thread):
         task = SendTask(identity, text,thread)
         self.queue.put(task)
@@ -139,9 +138,15 @@ class MetaGsmPollingThread(threading.Thread):
         task = StatusTask(thread)
         self.queue.put(task)
         return task
+
+    def enqueue_read(self):
+        task = ReadTask()
+        self.queue.put(task)
+        return task
+        
         
     def act(self, task):
-        logger.info("Got some send:"+ identity + text)
+        logger.info("Got some task")
 
         if task.op == "status" and self.modem_proxy is None:
             return STATUS_NOK
@@ -167,16 +172,16 @@ class MetaGsmPollingThread(threading.Thread):
 
 
         if task.op == "send":
-            result = self.modem_proxy.send(task._identity,task._message)
+            result = self.modem_proxy.send_message(task._identity,task._message)
             task.result = result
         elif task.op == "status":
-            result = self.modem_proxy.status()
-            if status is None:
+            result = self.modem_proxy.read_status()
+            if result is None:
                 result = STATUS_NOK
             task.result = result
 
         elif task.op == "read":
-            accessor.read()
+            self.modem_proxy.read_message()
         
         task.is_done = True
 
@@ -205,7 +210,6 @@ class ModemProxy():
         self.url_args = url_args
         self.modem_kwargs = modem_args
         self.modem = None
-
         # set a default timeout if it wasn't specified in localsettings.py;
         # otherwise read() will hang forever if the modem is powered off
         if "timeout" not in self.modem_kwargs:
@@ -234,7 +238,7 @@ class ModemProxy():
             self.stop()
             raise
 
-        logger.info("########## GsmPollingThread run loop started")
+        logger.info("## Modem Boot complete")
 
     def _wait_for_modem(self):
         """
@@ -382,6 +386,7 @@ class ModemProxy():
     def read_message(self):
         try:
             msg = self.modem.next_message()
+            logger.info("The message from the modem: %s",str(msg))
             
             if msg is not None:
                 self.received_messages += 1
@@ -399,10 +404,9 @@ class ModemProxy():
         # The modem is actually fiddly:
         except (errors.GsmModemError, errors.GsmReadTimeoutError, serial.SerialException):
             logger.exception('## Exception while looking SMS on the modem ')
-        finally:
             self.stop()
             
-        logger.info("########## Read loop terminated.")
+        logger.info("## Read message(or not)")
 
     def stop(self):
         logger.info("## Discarding modem - After "+str(self.sent_messages) +" sent & "+str(self.failed_messages)+" failed message.")

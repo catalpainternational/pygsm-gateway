@@ -14,8 +14,8 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
 
     def __init__(self, address, enqueue_method, status_method):
         class Handler(BaseHTTPRequestHandler):
-            _enqueue_method = enqueue_method
-            _status_method = status_method
+            _enqueue_send = enqueue_method
+            _enqueue_status = status_method
 
             def request_close(self):
                 self.end_headers()
@@ -56,7 +56,7 @@ class PygsmHttpServer(ThreadingMixIn, HTTPServer):
                         self.send_header("_status","Not OK")
                     else:
                         self.send_header("_status","Maybe ok")
-                        for key,value in status.items():
+                        for key,value in task.result.items():
                             self.send_header(key,value)
 
                     self.request_close()
